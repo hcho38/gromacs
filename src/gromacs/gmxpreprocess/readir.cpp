@@ -2575,7 +2575,16 @@ void get_ir(const char*     mdparin,
     if (inputrecStrings->imd_grp[0] != '\0')
     {
         snew(ir->imd, 1);
-        ir->bIMD = TRUE;
+        ir->bIMD                 = TRUE;
+        ir->imd->imdversion      = get_eint(&inp, "IMD-version", 2, wi);
+        ir->imd->nstimd          = get_eint(&inp, "IMD-nst", 1, wi);
+        ir->imd->bSendTime       = (getEnum<Boolean>(&inp, "IMD-time", wi) != Boolean::No);
+        ir->imd->bSendBox        = (getEnum<Boolean>(&inp, "IMD-box", wi) != Boolean::No);
+        ir->imd->bSendCoords     = (getEnum<Boolean>(&inp, "IMD-coords", wi) != Boolean::No);
+        ir->imd->bWrapCoords     = (getEnum<Boolean>(&inp, "IMD-wrap", wi) != Boolean::No);
+        ir->imd->bSendForces     = (getEnum<Boolean>(&inp, "IMD-forces", wi) != Boolean::No);
+        ir->imd->bSendVelocities = (getEnum<Boolean>(&inp, "IMD-vels", wi) != Boolean::No);
+        ir->imd->bSendEnergies   = (getEnum<Boolean>(&inp, "IMD-energies", wi) != Boolean::No);
     }
 
     /* Refinement */

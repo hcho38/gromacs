@@ -141,6 +141,17 @@ typedef struct
     float   E_impr;  /**< improper dihedrals energy                     */
 } IMDEnergyBlock;
 
+typedef struct
+{
+    char bSendTime;
+    char bSendBox;
+    char bSendCoords;
+    char bWrapCoords;
+    char bSendVelocities;
+    char bSendForces;
+    char bSendEnergies;
+} IMDSessionInfo;
+
 
 /*! \internal
  * \brief IMD (interactive molecular dynamics) communication structure.
@@ -240,6 +251,9 @@ public:
 
     //! Number of atoms that can be pulled via IMD.
     int nat = 0;
+    //! IMD Version to be used.
+    int imdversion = 2;
+
     //! Part of the atoms that are local.
     int nat_loc = 0;
     //! Global indices of the IMD atoms.
@@ -301,6 +315,9 @@ public:
 
     //! Pointer to energies we send back.
     IMDEnergyBlock* energies = nullptr;
+
+    //! The IMD session info.
+    IMDSessionInfo* imdsessioninfo = nullptr;
 
     //! Number of VMD forces.
     int32_t vmd_nforces = 0;
@@ -505,10 +522,9 @@ static int imd_handshake(IMDSocket* socket)
                             != c_headerSize);
 }
 
-static int imd_handshake_v3(IMDSocket* socket)
+static int imd_handshake_v3(IMDSocket* socket, IMDSessionInfo* imdsessioninfo)
 {
     IMDHeader header;
-
 
     fill_header(&header, IMDMessageType::Handshake, 3);
     header.length = 3; /* client wants unswapped version */
@@ -516,22 +532,15 @@ static int imd_handshake_v3(IMDSocket* socket)
     if ((imd_write_multiple(socket, reinterpret_cast<char*>(&header), c_headerSize) != c_headerSize))
         return 1;
 
-    fill_header(&header, IMDMessageType::SessionInfo, 7);
-    if ((imd_write_multiple(socket, reinterpret_cast<char*>(&header), c_headerSize) != c_headerSize))
-        return 1;
+    int32_t recsize;
+    recsize = c_headerSize + sizeof(IMDSessionInfo);
+    char* buffer;
+    snew(buffer, recsize);
 
-    char sessionInfo[7]          = { 0 };
-    sessionInfo[0]               = 1; // Time
-    sessionInfo[1]               = 1; // Box
-    sessionInfo[2]               = 1; // Pos
-    sessionInfo[3]               = 1; // wrapped
-    sessionInfo[4]               = 1; // Velocities
-    sessionInfo[5]               = 1; // Forces
-    sessionInfo[6]               = 1; // Energies
-    const char* constSessionInfo = sessionInfo;
+    fill_header(reinterpret_cast<IMDHeader*>(buffer), IMDMessageType::SessionInfo, 7);
+    memcpy(buffer + c_headerSize, imdsessioninfo, sizeof(IMDSessionInfo));
 
-
-    return static_cast<int>(imd_write_multiple(socket, constSessionInfo, 7) != 7);
+    return static_cast<int>(imd_write_multiple(socket, buffer, recsize) != recsize);
 }
 
 
@@ -809,8 +818,10 @@ bool ImdSession::Impl::tryConnect()
             return false;
         }
 
+        GMX_LOG(mdLog_.warning).appendTextFormatted("%s IMD Version %d.", IMDstr, imdversion);
         /* handshake with client */
-        if (imd_handshake_v3(clientsocket))
+        if ((imdversion == 2 && imd_handshake(clientsocket))
+            || (imdversion == 3 && imd_handshake_v3(clientsocket, imdsessioninfo)))
         {
             issueFatalError("Connection failed.");
             return false;
@@ -1126,7 +1137,7 @@ void ImdSession::Impl::readCommand()
 
             /* the client asks us to (un)pause the simulation. So we toggle the IMDpaused state */
             case IMDMessageType::Pause:
-                if (IMDpaused)
+                if (IMDpaused && imdversion == 2)
                 {
                     GMX_LOG(mdLog_.warning).appendTextFormatted(" %s Un-pause command received.", IMDstr);
                     IMDpaused = false;
@@ -1138,7 +1149,13 @@ void ImdSession::Impl::readCommand()
                 }
 
                 break;
-
+            case IMDMessageType::Resume:
+                if (IMDpaused && imdversion == 3)
+                {
+                    GMX_LOG(mdLog_.warning).appendTextFormatted(" %s Resume command received.", IMDstr);
+                    IMDpaused = false;
+                    break;
+                }
             /* the client sets a new transfer rate, if we get 0, we reset the rate
              * to the default. VMD filters 0 however */
             case IMDMessageType::TRate:
@@ -1484,7 +1501,6 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     // terminal. This is probably be implemented by adding a logging
     // stream named like ImdInfo, to separate it from warning and to
     // send it to both destinations.
-
     if (EI_DYNAMICS(ir->eI))
     {
         impl->defaultNstImd = ir->nstcalcenergy;
@@ -1575,6 +1591,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     impl->enerd  = enerd;
     impl->dt     = ir->delta_t;
 
+
     /* We might need to open an output file for IMD forces data */
     if (MAIN(cr))
     {
@@ -1600,6 +1617,8 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     /* read environment on main and prepare socket for incoming connections */
     if (MAIN(cr))
     {
+        GMX_LOG(mdlog.warning).appendTextFormatted("%s Parsed IMD Version %d.", IMDstr, ir->imd->imdversion);
+
         /* we allocate memory for our IMD energy structure */
         int32_t recsize = c_headerSize + sizeof(IMDEnergyBlock);
         snew(impl->energysendbuf, recsize);
@@ -1641,6 +1660,18 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         snew(impl->energies, 1);
         int32_t bufxsize = c_headerSize + 3 * sizeof(float) * impl->nat;
         snew(impl->coordsendbuf, bufxsize);
+        snew(impl->imdsessioninfo, sizeof(IMDSessionInfo));
+
+        impl->imdversion = ir->imd->imdversion;
+        // NOTE: This overrides the default value nstimd set above.
+        impl->defaultNstImd                   = ir->imd->nstimd;
+        impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
+        impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
+        impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
+        impl->imdsessioninfo->bWrapCoords     = (char)ir->imd->bWrapCoords;
+        impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
+        impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
+        impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
     }
 
     /* do we allow interactive pulling? If so let the other nodes know. */
@@ -1739,7 +1770,7 @@ bool ImdSession::Impl::run(int64_t                        step,
                 cr_, xa, xa_shifts, xa_eshifts, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
 
         /* If connected and main -> remove shifts */
-        if ((imdstep && bConnected) && MAIN(cr_))
+        if (imdsessioninfo->bWrapCoords && (imdstep && bConnected) && MAIN(cr_))
         {
             removeMolecularShifts(box);
         }
@@ -1785,32 +1816,34 @@ void ImdSession::Impl::sendTimeBoxPositionsVelocitiesForcesEnergies()
         return;
     }
     GMX_LOG(mdLog_.warning).appendTextFormatted("%s Run called, sending positions.", IMDstr);
-    if (imd_send_time(clientsocket, dt, time, step, timesendbuf))
+    if (imdsessioninfo->bSendTime && imd_send_time(clientsocket, dt, time, step, timesendbuf))
     {
         issueFatalError("Error sending updated time. Disconnecting client.");
     }
 
-    if (imd_send_box(clientsocket, b, boxsendbuf))
+    if (imdversion == 3 && imdsessioninfo->bSendBox && imd_send_box(clientsocket, b, boxsendbuf))
     {
         issueFatalError("Error sending updated box. Disconnecting client.");
     }
 
-    if (imd_send_rvecs(clientsocket, nat, xa, coordsendbuf))
+    if (imdversion == 3 && imdsessioninfo->bSendCoords && imd_send_rvecs(clientsocket, nat, xa, coordsendbuf))
     {
         issueFatalError("Error sending updated positions. Disconnecting client.");
     }
     GMX_LOG(mdLog_.warning).appendTextFormatted("%s Positions sent.", IMDstr);
-    if (imd_send_rvecs_vel(clientsocket, nat, va, coordsendbuf))
+    if (imdversion == 3 && imdsessioninfo->bSendVelocities
+        && imd_send_rvecs_vel(clientsocket, nat, va, coordsendbuf))
     {
         issueFatalError("Error sending updated velocities. Disconnecting client.");
     }
     GMX_LOG(mdLog_.warning).appendTextFormatted("%s Velocities sent.", IMDstr);
-    if (imd_send_rvecs_forces(clientsocket, nat, va, coordsendbuf))
+    if (imdversion == 3 && imdsessioninfo->bSendForces
+        && imd_send_rvecs_forces(clientsocket, nat, va, coordsendbuf))
     {
         issueFatalError("Error sending updated forces. Disconnecting client.");
     }
 
-    if (imd_send_energies(clientsocket, energies, energysendbuf))
+    if (imdsessioninfo->bSendEnergies && imd_send_energies(clientsocket, energies, energysendbuf))
     {
         issueFatalError("Error sending updated energies. Disconnecting client.");
     }

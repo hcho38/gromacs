@@ -716,7 +716,7 @@ static bool gpuAccelerationOfNonbondedIsUseful(const MDLogger&   mdlog,
         gpuIsUseful = false;
         warning     = gmx::formatString(
                 "Multiple time stepping is only supported with GPUs when MTS is only applied to %s "
-                "forces.",
+                    "forces.",
                 mtsForceGroupNames[MtsForceGroups::LongrangeNonbonded].c_str());
     }
 
@@ -2070,6 +2070,7 @@ int Mdrunner::mdrunner()
                                  : nullptr;
 
                 const t_inputrec* ir = inputrec.get();
+                GMX_LOG(mdlog.warning).asParagraph().appendTextFormatted("IMD version: %d\n", ir->imd->imdversion);
                 /* For each atom we allow a relative (cut-off) error of up to ewald_rtol.
                  * Thus we can also tolerate an error of an order of magnitude less due to
                  * atoms being slightly outside the halo extent. This will only cause a fraction
@@ -2245,6 +2246,9 @@ int Mdrunner::mdrunner()
                                  inputrec->cos_accel,
                                  gmx_omp_nthreads_get(ModuleMultiThread::Update));
 
+            GMX_LOG(mdlog.warning)
+                    .asParagraph()
+                    .appendTextFormatted("pre-makeimdsesssion version: %d", inputrec.get()->imd->imdversion);
             /* Set up interactive MD (IMD) */
             auto imdSession = makeImdSession(inputrec.get(),
                                              cr,

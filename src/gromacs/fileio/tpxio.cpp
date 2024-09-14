@@ -519,6 +519,19 @@ static void do_imd(gmx::ISerializer* serializer, t_IMD* imd)
         snew(imd->ind, imd->nat);
     }
     serializer->doIntArray(imd->ind, imd->nat);
+    serializer->doInt(&imd->nstimd);
+    serializer->doInt(&imd->imdversion);
+    serializer->doBool(&imd->bSendCoords);
+    serializer->doBool(&imd->bWrapCoords);
+    serializer->doBool(&imd->bSendEnergies);
+    serializer->doInt(&imd->imdversion);
+    if (imd->imdversion == 3)
+    {
+        serializer->doBool(&imd->bSendTime);
+        serializer->doBool(&imd->bSendBox);
+        serializer->doBool(&imd->bSendVelocities);
+        serializer->doBool(&imd->bSendForces);
+    }
 }
 
 static void do_fepvals(gmx::ISerializer* serializer, t_lambda* fepvals, int file_version)

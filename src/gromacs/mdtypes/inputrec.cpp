@@ -818,6 +818,16 @@ static void pr_swap(FILE* fp, int indent, const t_swapcoords* swap)
 static void pr_imd(FILE* fp, int indent, const t_IMD* imd)
 {
     PI("IMD-atoms", imd->nat);
+    PI("IMD-nst", imd->nstimd);
+    PI("IMD-version", imd->imdversion);
+    PI("IMD-time", imd->bSendTime);
+    PI("IMD-box", imd->bSendBox);
+    PI("IMD-coords", imd->bSendCoords);
+    PI("IMD-wrap", imd->bWrapCoords);
+    PI("IMD-vels", imd->bSendVelocities);
+    PI("IMD-forces", imd->bSendForces);
+    PI("IMD-energies", imd->bSendEnergies);
+
     pr_ivec_block(fp, indent, "atom", imd->ind, imd->nat, TRUE);
 }
 

@@ -284,6 +284,26 @@ struct t_IMD
     int nat;
     //! The global indices of the interactive atoms
     int* ind;
+    //! The initial transmission rate of IMD data
+    int nstimd;
+    //! The IMD version to use (2 or 3)
+    int imdversion;
+
+    //! In the case of IMD_v3, these switches modify IMD SessionInfo
+    //! Whether to send time (dt, time, step) data
+    bool bSendTime;
+    //! Whether to send box data
+    bool bSendBox;
+    //! Whether to send coordinate data
+    bool bSendCoords;
+    //! Whether to wrap coordinates
+    bool bWrapCoords;
+    //! Whether to send velocities
+    bool bSendVelocities;
+    //! Whether to send forces
+    bool bSendForces;
+    //! Whether to send energies
+    bool bSendEnergies;
 };
 
 struct t_swapGroup
@@ -345,7 +365,7 @@ struct PressureCouplingOptions
 struct t_inputrec // NOLINT (clang-analyzer-optin.performance.Padding)
 {
     t_inputrec();
-    explicit t_inputrec(const t_inputrec&) = delete;
+    explicit t_inputrec(const t_inputrec&)   = delete;
     t_inputrec& operator=(const t_inputrec&) = delete;
     ~t_inputrec();
 
