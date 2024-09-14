@@ -221,7 +221,15 @@ public:
     /*! \brief Initialize arrays used to assemble the positions from the other nodes. */
     void prepareForPositionAssembly(const t_commrec* cr, gmx::ArrayRef<const gmx::RVec> coords);
     /*! \brief Interact with any connected VMD session */
-    bool run(int64_t step, bool bNS, const matrix box, gmx::ArrayRef<const gmx::RVec> coords, double t);
+    bool run(int64_t                        step,
+             bool                           bNS,
+             const matrix                   box,
+             gmx::ArrayRef<const gmx::RVec> coords,
+             gmx::ArrayRef<const gmx::RVec> vels,
+             gmx::ArrayRef<const gmx::RVec> forces,
+             double                         t);
+
+    void sendTimeBoxPositionsVelocitiesForcesEnergies();
 
     // TODO rename all the data members to have underscore suffixes
 
@@ -250,6 +258,19 @@ public:
     rvec* xa_old = nullptr;
     //! Position of each local atom in the collective array.
     int* xa_ind = nullptr;
+
+    //! Velocities for all IMD atoms assembled on the main node.
+    rvec* va = nullptr;
+    //! Forces for all IMD atoms assembled on the main node.
+    rvec* fa = nullptr;
+    //! Box dimensions for IMD.
+    matrix b;
+    //! Current time for IMD
+    double time = 0;
+    //! Current step for IMD
+    int64_t step = 0;
+    // DT for IMD
+    double dt = 0;
 
     //! Global IMD frequency, known to all ranks.
     int nstimd = 1;
@@ -300,6 +321,8 @@ public:
     char* energysendbuf = nullptr;
     //! Buffer to make molecules whole before sending.
     rvec* sendxbuf = nullptr;
+    char* timesendbuf;
+    char* boxsendbuf;
 
     //! Molecules block in IMD group.
     t_block mols;
@@ -363,7 +386,13 @@ enum class IMDMessageType : int
     Pause,      /**< pauses the simulation                           */
     TRate,      /**< sets the IMD transmission and processing rate   */
     IOerror,    /**< I/O error                                       */
-    Count       /**< number of entries                               */
+    SessionInfo,
+    Resume,
+    Time,
+    Box, /**< box size                                        */
+    Velocities,
+    Forces,
+    Count /**< number of entries                               */
 };
 
 
@@ -476,6 +505,35 @@ static int imd_handshake(IMDSocket* socket)
                             != c_headerSize);
 }
 
+static int imd_handshake_v3(IMDSocket* socket)
+{
+    IMDHeader header;
+
+
+    fill_header(&header, IMDMessageType::Handshake, 3);
+    header.length = 3; /* client wants unswapped version */
+
+    if ((imd_write_multiple(socket, reinterpret_cast<char*>(&header), c_headerSize) != c_headerSize))
+        return 1;
+
+    fill_header(&header, IMDMessageType::SessionInfo, 7);
+    if ((imd_write_multiple(socket, reinterpret_cast<char*>(&header), c_headerSize) != c_headerSize))
+        return 1;
+
+    char sessionInfo[7]          = { 0 };
+    sessionInfo[0]               = 1; // Time
+    sessionInfo[1]               = 1; // Box
+    sessionInfo[2]               = 1; // Pos
+    sessionInfo[3]               = 1; // wrapped
+    sessionInfo[4]               = 1; // Velocities
+    sessionInfo[5]               = 1; // Forces
+    sessionInfo[6]               = 1; // Energies
+    const char* constSessionInfo = sessionInfo;
+
+
+    return static_cast<int>(imd_write_multiple(socket, constSessionInfo, 7) != 7);
+}
+
 
 /*! \brief Send energies using the energy block and the send buffer. */
 static int imd_send_energies(IMDSocket* socket, const IMDEnergyBlock* energies, char* buffer)
@@ -490,6 +548,37 @@ static int imd_send_energies(IMDSocket* socket, const IMDEnergyBlock* energies, 
     return static_cast<int>(imd_write_multiple(socket, buffer, recsize) != recsize);
 }
 
+static int imd_send_time(IMDSocket* socket, double dt, double t, int64_t s, char* buffer)
+{
+    int32_t recsize;
+
+    recsize = c_headerSize + sizeof(double) + sizeof(double) + sizeof(int64_t);
+    fill_header(reinterpret_cast<IMDHeader*>(buffer), IMDMessageType::Time, 1);
+    memcpy(buffer + c_headerSize, &dt, sizeof(double));
+    memcpy(buffer + c_headerSize + sizeof(double), &t, sizeof(double));
+    memcpy(buffer + c_headerSize + sizeof(double) + sizeof(double), &s, sizeof(int64_t));
+
+    return static_cast<int>(imd_write_multiple(socket, buffer, recsize) != recsize);
+}
+
+static int imd_send_box(IMDSocket* socket, matrix box, char* buffer)
+{
+    int32_t recsize;
+    float   sendbox[9];
+
+    for (int i = 0; i < 3; i++)
+    {
+        sendbox[i]     = static_cast<float>(box[0][i]) * gmx::c_nm2A;
+        sendbox[i + 3] = static_cast<float>(box[1][i]) * gmx::c_nm2A;
+        sendbox[i + 6] = static_cast<float>(box[2][i]) * gmx::c_nm2A;
+    }
+
+    recsize = c_headerSize + sizeof(float) * 9;
+    fill_header(reinterpret_cast<IMDHeader*>(buffer), IMDMessageType::Box, 1);
+    memcpy(buffer + c_headerSize, sendbox, sizeof(float) * 9);
+
+    return static_cast<int>(imd_write_multiple(socket, buffer, recsize) != recsize);
+}
 
 /*! \brief Receive IMD header from socket, sets the length and returns the IMD message. */
 static IMDMessageType imd_recv_header(IMDSocket* socket, int32_t* length)
@@ -595,6 +684,54 @@ static int imd_send_rvecs(IMDSocket* socket, int nat, rvec* x, char* buffer)
     return static_cast<int>(imd_write_multiple(socket, buffer, size) != size);
 }
 
+static int imd_send_rvecs_vel(IMDSocket* socket, int nat, rvec* v, char* buffer)
+{
+    int32_t size;
+    int     i;
+    float   sendv[3];
+    int     tuplesize = 3 * sizeof(float);
+
+
+    /* Required size for the send buffer */
+    size = c_headerSize + 3 * sizeof(float) * nat;
+
+    /* Prepare header */
+    fill_header(reinterpret_cast<IMDHeader*>(buffer), IMDMessageType::Velocities, static_cast<int32_t>(nat));
+    for (i = 0; i < nat; i++)
+    {
+        sendv[0] = static_cast<float>(v[i][0]) * gmx::c_nm2A;
+        sendv[1] = static_cast<float>(v[i][1]) * gmx::c_nm2A;
+        sendv[2] = static_cast<float>(v[i][2]) * gmx::c_nm2A;
+        memcpy(buffer + c_headerSize + i * tuplesize, sendv, tuplesize);
+    }
+
+    return static_cast<int>(imd_write_multiple(socket, buffer, size) != size);
+}
+
+static int imd_send_rvecs_forces(IMDSocket* socket, int nat, rvec* f, char* buffer)
+{
+    int32_t size;
+    int     i;
+    float   sendf[3];
+    int     tuplesize = 3 * sizeof(float);
+
+
+    /* Required size for the send buffer */
+    size = c_headerSize + 3 * sizeof(float) * nat;
+
+    /* Prepare header */
+    fill_header(reinterpret_cast<IMDHeader*>(buffer), IMDMessageType::Forces, static_cast<int32_t>(nat));
+    for (i = 0; i < nat; i++)
+    {
+        sendf[0] = static_cast<float>(f[i][0]) / gmx::c_nm2A;
+        sendf[1] = static_cast<float>(f[i][1]) / gmx::c_nm2A;
+        sendf[2] = static_cast<float>(f[i][2]) / gmx::c_nm2A;
+        memcpy(buffer + c_headerSize + i * tuplesize, sendf, tuplesize);
+    }
+
+    return static_cast<int>(imd_write_multiple(socket, buffer, size) != size);
+}
+
 
 void ImdSession::Impl::prepareMainSocket()
 {
@@ -673,7 +810,7 @@ bool ImdSession::Impl::tryConnect()
         }
 
         /* handshake with client */
-        if (imd_handshake(clientsocket))
+        if (imd_handshake_v3(clientsocket))
         {
             issueFatalError("Connection failed.");
             return false;
@@ -976,6 +1113,7 @@ void ImdSession::Impl::readCommand()
 
             /* the client doen't want to talk to us anymore */
             case IMDMessageType::Disconnect:
+                GMX_LOG(mdLog_.warning).appendTextFormatted("%s Okay client, you asked for it", IMDstr);
                 GMX_LOG(mdLog_.warning).appendTextFormatted(" %s Disconnecting client.", IMDstr);
                 disconnectClient();
                 break;
@@ -1017,7 +1155,7 @@ void ImdSession::Impl::readCommand()
                 issueFatalError("Terminating connection");
                 break;
         } /* end switch */
-    }     /* end while  */
+    } /* end while  */
 }
 
 
@@ -1264,6 +1402,9 @@ void ImdSession::Impl::prepareForPositionAssembly(const t_commrec* cr, gmx::Arra
     snew(xa_eshifts, nat);
     snew(xa_old, nat);
 
+    snew(va, nat);
+    snew(fa, nat);
+
     /* Save the original (whole) set of positions such that later the
      * molecule can always be made whole again */
     if (MAIN(cr))
@@ -1319,11 +1460,12 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
                                            const gmx_mtop_t&              top_global,
                                            const MDLogger&                mdlog,
                                            gmx::ArrayRef<const gmx::RVec> coords,
-                                           int                            nfile,
-                                           const t_filenm                 fnm[],
-                                           const gmx_output_env_t*        oenv,
-                                           const ImdOptions&              options,
-                                           const gmx::StartingBehavior    startingBehavior)
+
+                                           int                         nfile,
+                                           const t_filenm              fnm[],
+                                           const gmx_output_env_t*     oenv,
+                                           const ImdOptions&           options,
+                                           const gmx::StartingBehavior startingBehavior)
 {
     std::unique_ptr<ImdSession> session(new ImdSession(mdlog));
     auto*                       impl = session->impl_.get();
@@ -1431,6 +1573,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     impl->cr_    = cr;
     impl->wcycle = wcycle;
     impl->enerd  = enerd;
+    impl->dt     = ir->delta_t;
 
     /* We might need to open an output file for IMD forces data */
     if (MAIN(cr))
@@ -1460,6 +1603,12 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         /* we allocate memory for our IMD energy structure */
         int32_t recsize = c_headerSize + sizeof(IMDEnergyBlock);
         snew(impl->energysendbuf, recsize);
+
+        recsize = c_headerSize + sizeof(int64_t) + 2 * sizeof(double);
+        snew(impl->timesendbuf, recsize);
+
+        recsize = c_headerSize + 9 * sizeof(float);
+        snew(impl->boxsendbuf, recsize);
 
         /* Shall we wait for a connection? */
         if (options.wait)
@@ -1531,7 +1680,13 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
 }
 
 
-bool ImdSession::Impl::run(int64_t step, bool bNS, const matrix box, gmx::ArrayRef<const gmx::RVec> coords, double t)
+bool ImdSession::Impl::run(int64_t                        step,
+                           bool                           bNS,
+                           const matrix                   box,
+                           gmx::ArrayRef<const gmx::RVec> coords,
+                           gmx::ArrayRef<const gmx::RVec> vels,
+                           gmx::ArrayRef<const gmx::RVec> forces,
+                           double                         t)
 {
     /* IMD at all? */
     if (!sessionPossible)
@@ -1590,14 +1745,87 @@ bool ImdSession::Impl::run(int64_t step, bool bNS, const matrix box, gmx::ArrayR
         }
     }
 
+
+    if (imdstep && bConnected)
+    {
+        GMX_LOG(mdLog_.warning).appendTextFormatted("%s Copying velocity data", IMDstr);
+        time       = t;
+        this->step = step;
+
+        const rvec* v_loc = as_rvec_array(vels.data());
+        for (int i = 0; i < nat_loc; i++)
+        {
+            copy_rvec(v_loc[ind_loc[i]], va[xa_ind[i]]);
+        }
+
+        const rvec* f_loc = as_rvec_array(forces.data());
+        for (int i = 0; i < nat_loc; i++)
+        {
+            copy_rvec(f_loc[ind_loc[i]], fa[xa_ind[i]]);
+        }
+
+        copy_mat(box, b);
+
+        GMX_LOG(mdLog_.warning).appendTextFormatted("%s Run called, attempting to send positions.", IMDstr);
+
+        /* Send positions and energies to VMD client via IMD */
+        sendTimeBoxPositionsVelocitiesForcesEnergies();
+    }
+
+
     wallcycle_stop(wcycle, WallCycleCounter::Imd);
 
     return imdstep;
 }
 
-bool ImdSession::run(int64_t step, bool bNS, const matrix box, gmx::ArrayRef<const gmx::RVec> coords, double t)
+void ImdSession::Impl::sendTimeBoxPositionsVelocitiesForcesEnergies()
 {
-    return impl_->run(step, bNS, box, coords, t);
+    if (!sessionPossible || !clientsocket)
+    {
+        return;
+    }
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Run called, sending positions.", IMDstr);
+    if (imd_send_time(clientsocket, dt, time, step, timesendbuf))
+    {
+        issueFatalError("Error sending updated time. Disconnecting client.");
+    }
+
+    if (imd_send_box(clientsocket, b, boxsendbuf))
+    {
+        issueFatalError("Error sending updated box. Disconnecting client.");
+    }
+
+    if (imd_send_rvecs(clientsocket, nat, xa, coordsendbuf))
+    {
+        issueFatalError("Error sending updated positions. Disconnecting client.");
+    }
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Positions sent.", IMDstr);
+    if (imd_send_rvecs_vel(clientsocket, nat, va, coordsendbuf))
+    {
+        issueFatalError("Error sending updated velocities. Disconnecting client.");
+    }
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Velocities sent.", IMDstr);
+    if (imd_send_rvecs_forces(clientsocket, nat, va, coordsendbuf))
+    {
+        issueFatalError("Error sending updated forces. Disconnecting client.");
+    }
+
+    if (imd_send_energies(clientsocket, energies, energysendbuf))
+    {
+        issueFatalError("Error sending updated energies. Disconnecting client.");
+    }
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Energies sent.", IMDstr);
+}
+
+bool ImdSession::run(int64_t                        step,
+                     bool                           bNS,
+                     const matrix                   box,
+                     gmx::ArrayRef<const gmx::RVec> coords,
+                     gmx::ArrayRef<const gmx::RVec> vels,
+                     gmx::ArrayRef<const gmx::RVec> forces,
+                     double                         t)
+{
+    return impl_->run(step, bNS, box, coords, vels, forces, t);
 }
 
 void ImdSession::fillEnergyRecord(int64_t step, bool bHaveNewEnergies)
@@ -1659,12 +1887,6 @@ void ImdSession::updateEnergyRecordAndSendPositionsAndEnergies(bool bIMDstep, in
 
     /* Update time step for IMD and prepare IMD energy record if we have new energies. */
     fillEnergyRecord(step, bHaveNewEnergies);
-
-    if (bIMDstep)
-    {
-        /* Send positions and energies to VMD client via IMD */
-        sendPositionsAndEnergies();
-    }
 
     wallcycle_stop(impl_->wcycle, WallCycleCounter::Imd);
 }

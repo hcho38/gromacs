@@ -1059,8 +1059,7 @@ void gmx::LegacySimulator::do_md()
 
         if (MAIN(cr_) && do_log)
         {
-            gmx::EnergyOutput::printHeader(
-                    fpLog_, step, t); /* can we improve the information printed here? */
+            gmx::EnergyOutput::printHeader(fpLog_, step, t); /* can we improve the information printed here? */
         }
 
         if (ir->efep != FreeEnergyPerturbationType::No)
@@ -1447,7 +1446,8 @@ void gmx::LegacySimulator::do_md()
                                      mdrunOptions_.writeConfout,
                                      ekindataState);
             /* Check if IMD step and do IMD communication, if bIMD is TRUE. */
-            bInteractiveMDstep = imdSession_->run(step, bNS, state_->box, state_->x, t);
+            bInteractiveMDstep =
+                    imdSession_->run(step, bNS, state_->box, state_->x, state_->v, f.view().force(), t);
 
             /* kludge -- virial is lost with restart for MTTK NPT control. Must reload (saved earlier). */
             if (startingBehavior_ != StartingBehavior::NewSimulation && bFirstStep
@@ -1800,7 +1800,7 @@ void gmx::LegacySimulator::do_md()
                 // bGStat becomes true, so we can't get into a
                 // situation where e.g. checkpointing can't be
                 // signalled.
-                bool                doIntraSimSignal = true;
+                bool doIntraSimSignal = true;
                 SimulationSignaller signaller(&signals, cr_, ms_, doInterSimSignal, doIntraSimSignal);
 
                 compute_globals(gstat,
