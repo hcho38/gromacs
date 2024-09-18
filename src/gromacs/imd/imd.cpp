@@ -144,12 +144,12 @@ typedef struct
 typedef struct
 {
     char bSendTime;
+    char bSendEnergies;
     char bSendBox;
     char bSendCoords;
     char bWrapCoords;
     char bSendVelocities;
     char bSendForces;
-    char bSendEnergies;
 } IMDSessionInfo;
 
 
@@ -714,6 +714,8 @@ static int imd_send_rvecs_vel(IMDSocket* socket, int nat, rvec* v, char* buffer)
         memcpy(buffer + c_headerSize + i * tuplesize, sendv, tuplesize);
     }
 
+
+    
     return static_cast<int>(imd_write_multiple(socket, buffer, size) != size);
 }
 
@@ -1154,8 +1156,8 @@ void ImdSession::Impl::readCommand()
                 {
                     GMX_LOG(mdLog_.warning).appendTextFormatted(" %s Resume command received.", IMDstr);
                     IMDpaused = false;
-                    break;
                 }
+                break;
             /* the client sets a new transfer rate, if we get 0, we reset the rate
              * to the default. VMD filters 0 however */
             case IMDMessageType::TRate:
@@ -1821,6 +1823,12 @@ void ImdSession::Impl::sendTimeBoxPositionsVelocitiesForcesEnergies()
         issueFatalError("Error sending updated time. Disconnecting client.");
     }
 
+    if (imdsessioninfo->bSendEnergies && imd_send_energies(clientsocket, energies, energysendbuf))
+    {
+        issueFatalError("Error sending updated energies. Disconnecting client.");
+    }
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Energies sent.", IMDstr);
+
     if (imdversion == 3 && imdsessioninfo->bSendBox && imd_send_box(clientsocket, b, boxsendbuf))
     {
         issueFatalError("Error sending updated box. Disconnecting client.");
@@ -1842,12 +1850,6 @@ void ImdSession::Impl::sendTimeBoxPositionsVelocitiesForcesEnergies()
     {
         issueFatalError("Error sending updated forces. Disconnecting client.");
     }
-
-    if (imdsessioninfo->bSendEnergies && imd_send_energies(clientsocket, energies, energysendbuf))
-    {
-        issueFatalError("Error sending updated energies. Disconnecting client.");
-    }
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Energies sent.", IMDstr);
 }
 
 bool ImdSession::run(int64_t                        step,
