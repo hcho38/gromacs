@@ -1666,6 +1666,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
 
         impl->imdversion = ir->imd->imdversion;
         // NOTE: This overrides the default value nstimd set above.
+        impl->nstimd                          = ir->imd->nstimd;
         impl->defaultNstImd                   = ir->imd->nstimd;
         impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
         impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
