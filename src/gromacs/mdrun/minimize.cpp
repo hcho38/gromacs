@@ -1931,10 +1931,15 @@ void LegacySimulator::do_cg()
         }
 
         /* Send energies and positions to the IMD client if bIMD is TRUE. */
-        // if (MAIN(cr_) && imdSession_->run(step, TRUE, stateGlobal_->box, stateGlobal_->x, 0))
-        // {
-        //     imdSession_->sendPositionsAndEnergies();
-        // }
+        if (MAIN(cr_) && imdSession_->run(step, TRUE, stateGlobal_->box, stateGlobal_->x, stateGlobal_->v, s_min->f.view().force(), static_cast<double>(step)))
+        {
+            if (inputRec_->imd->imdversion == 2) {
+                imdSession_->sendPositionsAndEnergies();
+            }
+            if (inputRec_->imd->imdversion == 3) {
+                imdSession_->sendTimeBoxPositionsVelocitiesForcesEnergies();
+            }
+        }
 
         /* Stop when the maximum force lies below tolerance.
          * If we have reached machine precision, converged is already set to true.
@@ -2763,11 +2768,15 @@ void LegacySimulator::do_lbfgs()
         }
 
         /* Send x and E to IMD client, if bIMD is TRUE. */
-        // if (imdSession_->run(step, TRUE, stateGlobal_->box, stateGlobal_->x, 0) && MAIN(cr_))
-        // {
-        //     imdSession_->sendPositionsAndEnergies();
-        // }
-
+        if (MAIN(cr_) && imdSession_->run(step, TRUE, stateGlobal_->box, stateGlobal_->x, stateGlobal_->v,ems.f.view().force(), static_cast<double>(step)))
+        {
+            if (inputRec_->imd->imdversion == 2) {
+                imdSession_->sendPositionsAndEnergies();
+            }
+            if (inputRec_->imd->imdversion == 3) {
+                imdSession_->sendTimeBoxPositionsVelocitiesForcesEnergies();
+            }
+        }
         // Reset stepsize in we are doing more iterations
         stepsize = 1.0;
 
@@ -3136,15 +3145,22 @@ void LegacySimulator::do_steep()
         }
 
         /* Send IMD energies and positions, if bIMD is TRUE. */
-        // if (imdSession_->run(count,
-        //                      TRUE,
-        //                      MAIN(cr_) ? stateGlobal_->box : nullptr,
-        //                      MAIN(cr_) ? stateGlobal_->x : gmx::ArrayRef<gmx::RVec>(),
-        //                      0)
-        //     && MAIN(cr_))
-        // {
-        //     imdSession_->sendPositionsAndEnergies();
-        // }
+        if (imdSession_->run(count,
+                             TRUE,
+                             MAIN(cr_) ? stateGlobal_->box : nullptr,
+                             MAIN(cr_) ? stateGlobal_->x : gmx::ArrayRef<gmx::RVec>(),
+                             MAIN(cr_) ? stateGlobal_->v : gmx::ArrayRef<gmx::RVec>(),
+                             s_min->f.view().force(),
+                             static_cast<double>(count))
+            && MAIN(cr_))
+        {
+            if (inputRec_->imd->imdversion == 2) {
+                imdSession_->sendPositionsAndEnergies();
+            }
+            if (inputRec_->imd->imdversion == 3) {
+                imdSession_->sendTimeBoxPositionsVelocitiesForcesEnergies();
+            }
+        }
 
         count++;
         observablesReducer.markAsReadyToReduce();

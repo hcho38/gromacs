@@ -240,8 +240,6 @@ public:
              gmx::ArrayRef<const gmx::RVec> forces,
              double                         t);
 
-    void sendTimeBoxPositionsVelocitiesForcesEnergies();
-
     // TODO rename all the data members to have underscore suffixes
 
     //! True if tpr and mdrun input combine to permit IMD sessions
@@ -1505,17 +1503,27 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     // terminal. This is probably be implemented by adding a logging
     // stream named like ImdInfo, to separate it from warning and to
     // send it to both destinations.
+    impl->imdversion = ir->imd->imdversion;
+    impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
+    impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
+    impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
+    impl->imdsessioninfo->bWrapCoords     = (char)ir->imd->bWrapCoords;
+    impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
+    impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
+    impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
     if (EI_DYNAMICS(ir->eI))
     {
-        //impl->defaultNstImd = ir->nstcalcenergy;
-        impl->defaultNstImd = ir->imd->nstimd;
-        GMX_LOG(mdlog.warning).appendTextFormatted("%d NSTIMD at RUN pre MAIN", impl->defaultNstImd);
-        GMX_LOG(mdlog.warning).appendTextFormatted("%d NSTIMD new at RUN pre MAIN", impl->nstimd_new);
-        impl->nstimd_new = ir->imd->nstimd;
+        if (impl->imdversion == 2) {
+            impl->defaultNstImd = ir->nstcalcenergy;
+        }
+        else {
+            impl->nstimd                          = ir->imd->nstimd;
+            impl->defaultNstImd                   = ir->imd->nstimd;
+        }
     }
-    else if (EI_ENERGY_MINIMIZATION(ir->eI))
-    {
-        impl->defaultNstImd = 1;
+    else if (EI_ENERGY_MINIMIZATION(ir->eI)) {
+        impl->defaultNstImd = ir->imd->nstimd;
+        impl->nstimd_new = ir->imd->nstimd;
     }
     else
     {
@@ -1669,19 +1677,6 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         int32_t bufxsize = c_headerSize + 3 * sizeof(float) * impl->nat;
         snew(impl->coordsendbuf, bufxsize);
         snew(impl->imdsessioninfo, sizeof(IMDSessionInfo));
-
-        impl->imdversion = ir->imd->imdversion;
-        // NOTE: This overrides the default value nstimd set above.
-        impl->nstimd                          = ir->imd->nstimd;
-        impl->defaultNstImd                   = ir->imd->nstimd;
-        impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
-        impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
-        impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
-        impl->imdsessioninfo->bWrapCoords     = (char)ir->imd->bWrapCoords;
-        impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
-        impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
-        impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
-        GMX_LOG(mdlog.warning).appendTextFormatted("%d NSTIMD at RUN", impl->nstimd);
     }
 
     /* do we allow interactive pulling? If so let the other nodes know. */
@@ -1785,79 +1780,66 @@ bool ImdSession::Impl::run(int64_t                        step,
         {
             removeMolecularShifts(box);
         }
-    }
 
+        if (imdversion == 3) {
+            GMX_LOG(mdLog_.warning).appendTextFormatted("%s Copying velocity data", IMDstr);
+            time       = t;
+            this->step = step;
 
-    if (imdstep && bConnected)
-    {
-        GMX_LOG(mdLog_.warning).appendTextFormatted("%s Copying velocity data", IMDstr);
-        time       = t;
-        this->step = step;
+            const rvec* v_loc = as_rvec_array(vels.data());
+            for (int i = 0; i < nat_loc; i++)
+            {
+                copy_rvec(v_loc[ind_loc[i]], va[xa_ind[i]]);
+            }
 
-        const rvec* v_loc = as_rvec_array(vels.data());
-        for (int i = 0; i < nat_loc; i++)
-        {
-            copy_rvec(v_loc[ind_loc[i]], va[xa_ind[i]]);
+            const rvec* f_loc = as_rvec_array(forces.data());
+            for (int i = 0; i < nat_loc; i++)
+            {
+                copy_rvec(f_loc[ind_loc[i]], fa[xa_ind[i]]);
+            }
+
+            copy_mat(box, b);
         }
-
-        const rvec* f_loc = as_rvec_array(forces.data());
-        for (int i = 0; i < nat_loc; i++)
-        {
-            copy_rvec(f_loc[ind_loc[i]], fa[xa_ind[i]]);
-        }
-
-        copy_mat(box, b);
-
-        GMX_LOG(mdLog_.warning).appendTextFormatted("%s Run called, attempting to send positions.", IMDstr);
-
-        /* Send positions and energies to VMD client via IMD */
-        sendTimeBoxPositionsVelocitiesForcesEnergies();
     }
-
 
     wallcycle_stop(wcycle, WallCycleCounter::Imd);
 
     return imdstep;
 }
 
-void ImdSession::Impl::sendTimeBoxPositionsVelocitiesForcesEnergies()
+void ImdSession::sendTimeBoxPositionsVelocitiesForcesEnergies()
 {
-    if (!sessionPossible || !clientsocket)
+    if (!impl_->sessionPossible || !impl_->clientsocket)
     {
         return;
     }
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Run called, sending positions.", IMDstr);
-    if (imdsessioninfo->bSendTime && imd_send_time(clientsocket, dt, time, step, timesendbuf))
+    if (impl_->imdsessioninfo->bSendTime && imd_send_time(impl_->clientsocket, impl_->dt, impl_->time, impl_->step, impl_->timesendbuf))
     {
-        issueFatalError("Error sending updated time. Disconnecting client.");
+        impl_->issueFatalError("Error sending updated time. Disconnecting client.");
     }
 
-    if (imdsessioninfo->bSendEnergies && imd_send_energies(clientsocket, energies, energysendbuf))
+    if (impl_->imdsessioninfo->bSendEnergies && imd_send_energies(impl_->clientsocket, impl_->energies, impl_->energysendbuf))
     {
-        issueFatalError("Error sending updated energies. Disconnecting client.");
+        impl_->issueFatalError("Error sending updated energies. Disconnecting client.");
     }
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Energies sent.", IMDstr);
-
-    if (imdversion == 3 && imdsessioninfo->bSendBox && imd_send_box(clientsocket, b, boxsendbuf))
+    if (impl_->imdsessioninfo->bSendBox && imd_send_box(impl_->clientsocket, impl_->b, impl_->boxsendbuf))
     {
-        issueFatalError("Error sending updated box. Disconnecting client.");
+        impl_->issueFatalError("Error sending updated box. Disconnecting client.");
     }
 
-    if (imdversion == 3 && imdsessioninfo->bSendCoords && imd_send_rvecs(clientsocket, nat, xa, coordsendbuf))
+    if (impl_->imdsessioninfo->bSendCoords && imd_send_rvecs(impl_->clientsocket, impl_->nat, impl_->xa, impl_->coordsendbuf))
     {
-        issueFatalError("Error sending updated positions. Disconnecting client.");
+        impl_->issueFatalError("Error sending updated positions. Disconnecting client.");
     }
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Positions sent.", IMDstr);
-    if (imdversion == 3 && imdsessioninfo->bSendVelocities
-        && imd_send_rvecs_vel(clientsocket, nat, va, coordsendbuf))
+    if (impl_->imdsessioninfo->bSendVelocities
+        && imd_send_rvecs_vel(impl_->clientsocket, impl_->nat, impl_->va, impl_->coordsendbuf))
     {
-        issueFatalError("Error sending updated velocities. Disconnecting client.");
+        impl_->issueFatalError("Error sending updated velocities. Disconnecting client.");
     }
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%s Velocities sent.", IMDstr);
-    if (imdversion == 3 && imdsessioninfo->bSendForces
-        && imd_send_rvecs_forces(clientsocket, nat, va, coordsendbuf))
+    if (impl_->imdsessioninfo->bSendForces
+        && imd_send_rvecs_forces(impl_->clientsocket, impl_->nat, impl_->va, impl_->coordsendbuf))
     {
-        issueFatalError("Error sending updated forces. Disconnecting client.");
+        impl_->issueFatalError("Error sending updated forces. Disconnecting client.");
     }
 }
 
@@ -1931,6 +1913,16 @@ void ImdSession::updateEnergyRecordAndSendPositionsAndEnergies(bool bIMDstep, in
 
     /* Update time step for IMD and prepare IMD energy record if we have new energies. */
     fillEnergyRecord(step, bHaveNewEnergies);
+
+    if (bIMDstep) {
+        if (impl_->imdversion == 2) {
+            /* Send positions and energies to VMD client via IMD */
+            sendPositionsAndEnergies();
+        }
+        else if (impl_->imdversion == 3) {
+            sendTimeBoxPositionsVelocitiesForcesEnergies();
+        } 
+    }
 
     wallcycle_stop(impl_->wcycle, WallCycleCounter::Imd);
 }

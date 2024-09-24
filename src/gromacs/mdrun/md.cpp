@@ -1385,7 +1385,8 @@ void gmx::LegacySimulator::do_md()
             // Copy coordinate from the GPU for the output/checkpointing if the update is offloaded
             // and coordinates have not already been copied for i) search or ii) CPU force tasks.
             if (useGpuForUpdate && !bNS && !runScheduleWork_->domainWork.haveCpuLocalForceWork
-                && (do_per_step(step, ir->nstxout) || do_per_step(step, ir->nstxout_compressed)
+                && (do_per_step(step, ir->nstxout) || do_per_step(step, ir->nstxout_compressed) 
+                    || (ir->bIMD && do_per_step(step, ir->imd->nstimd))
                     || checkpointHandler->isCheckpointingStep()))
             {
                 stateGpu->copyCoordinatesFromGpu(state_->x, AtomLocality::Local);
@@ -1394,7 +1395,9 @@ void gmx::LegacySimulator::do_md()
             // Copy velocities if needed for the output/checkpointing.
             // NOTE: Copy on the search steps is done at the beginning of the step.
             if (useGpuForUpdate && !bNS
-                && (do_per_step(step, ir->nstvout) || checkpointHandler->isCheckpointingStep()))
+                && (do_per_step(step, ir->nstvout) 
+                || (ir->bIMD && do_per_step(step, ir->imd->nstimd))
+                || checkpointHandler->isCheckpointingStep()))
             {
                 stateGpu->copyVelocitiesFromGpu(state_->v, AtomLocality::Local);
                 stateGpu->waitVelocitiesReadyOnHost(AtomLocality::Local);
@@ -1410,7 +1413,8 @@ void gmx::LegacySimulator::do_md()
             // NOTE: The forces should not be copied here if the vsites are present, since they were modified
             //       on host after the D2H copy in do_force(...).
             if (runScheduleWork_->stepWork.useGpuFBufferOps
-                && (simulationWork.useGpuUpdate && !virtualSites_) && do_per_step(step, ir->nstfout))
+                && (simulationWork.useGpuUpdate && !virtualSites_) && 
+                (do_per_step(step, ir->nstfout) || (ir->bIMD && do_per_step(step, ir->imd->nstimd))))
             {
                 stateGpu->copyForcesFromGpu(f.view().force(), AtomLocality::Local);
                 stateGpu->waitForcesReadyOnHost(AtomLocality::Local);

@@ -210,6 +210,7 @@ public:
 
     /*! \brief Send positions and energies to the client. */
     void sendPositionsAndEnergies();
+    void sendTimeBoxPositionsVelocitiesForcesEnergies();
 
     /*! \brief Updates the energy record sent to VMD if needed, and sends positions and energies.
      *
