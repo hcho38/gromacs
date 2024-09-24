@@ -793,6 +793,7 @@ void ImdSession::Impl::disconnectClient()
     }
 
     /* then we reset the IMD step to its default, and reset the connection boolean */
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%d nstimd disconnect.", defaultNstImd);
     nstimd_new   = defaultNstImd;
     clientsocket = nullptr;
     bConnected   = false;
@@ -1021,6 +1022,7 @@ void ImdSession::Impl::syncNodes(const t_commrec* cr, double t)
         block_bc(cr->mpi_comm_mygroup, nstimd_new);
     }
 
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%d nstimd after new", nstimd_new);
     /* Now we all set the (new) nstimd communication time step */
     nstimd = nstimd_new;
 
@@ -1505,7 +1507,11 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     // send it to both destinations.
     if (EI_DYNAMICS(ir->eI))
     {
-        impl->defaultNstImd = ir->nstcalcenergy;
+        //impl->defaultNstImd = ir->nstcalcenergy;
+        impl->defaultNstImd = ir->imd->nstimd;
+        GMX_LOG(mdlog.warning).appendTextFormatted("%d NSTIMD at RUN pre MAIN", impl->defaultNstImd);
+        GMX_LOG(mdlog.warning).appendTextFormatted("%d NSTIMD new at RUN pre MAIN", impl->nstimd_new);
+        impl->nstimd_new = ir->imd->nstimd;
     }
     else if (EI_ENERGY_MINIMIZATION(ir->eI))
     {
@@ -1675,6 +1681,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
         impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
         impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
+        GMX_LOG(mdlog.warning).appendTextFormatted("%d NSTIMD at RUN", impl->nstimd);
     }
 
     /* do we allow interactive pulling? If so let the other nodes know. */
@@ -1755,6 +1762,7 @@ bool ImdSession::Impl::run(int64_t                        step,
 
     /* is this an IMD communication step? */
     bool imdstep = do_per_step(step, nstimd);
+    GMX_LOG(mdLog_.warning).appendTextFormatted("%d NSTIMD", nstimd);
 
     /* OK so this is an IMD step ... */
     if (imdstep)
