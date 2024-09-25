@@ -1507,7 +1507,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
             impl->defaultNstImd = ir->nstcalcenergy;
         }
         else if (version == 3) {
-            impl->nstimd                          = ir->imd->nstimd;
+            impl->nstimd_new                          = ir->imd->nstimd;
             impl->defaultNstImd                   = ir->imd->nstimd;
         }
     }
