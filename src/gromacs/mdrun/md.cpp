@@ -1386,7 +1386,7 @@ void gmx::LegacySimulator::do_md()
             // and coordinates have not already been copied for i) search or ii) CPU force tasks.
             if (useGpuForUpdate && !bNS && !runScheduleWork_->domainWork.haveCpuLocalForceWork
                 && (do_per_step(step, ir->nstxout) || do_per_step(step, ir->nstxout_compressed) 
-                    || (ir->bIMD && do_per_step(step, ir->imd->nstimd))
+                    || (ir->bIMD && ir->imd->bSendCoords && do_per_step(step, ir->imd->nstimd))
                     || checkpointHandler->isCheckpointingStep()))
             {
                 stateGpu->copyCoordinatesFromGpu(state_->x, AtomLocality::Local);
@@ -1396,7 +1396,7 @@ void gmx::LegacySimulator::do_md()
             // NOTE: Copy on the search steps is done at the beginning of the step.
             if (useGpuForUpdate && !bNS
                 && (do_per_step(step, ir->nstvout) 
-                || (ir->bIMD && do_per_step(step, ir->imd->nstimd))
+                || (ir->bIMD && ir->imd->bSendVelocities && do_per_step(step, ir->imd->nstimd))
                 || checkpointHandler->isCheckpointingStep()))
             {
                 stateGpu->copyVelocitiesFromGpu(state_->v, AtomLocality::Local);
@@ -1414,7 +1414,7 @@ void gmx::LegacySimulator::do_md()
             //       on host after the D2H copy in do_force(...).
             if (runScheduleWork_->stepWork.useGpuFBufferOps
                 && (simulationWork.useGpuUpdate && !virtualSites_) && 
-                (do_per_step(step, ir->nstfout) || (ir->bIMD && do_per_step(step, ir->imd->nstimd))))
+                (do_per_step(step, ir->nstfout) || (ir->bIMD && ir->imd->bSendForces && do_per_step(step, ir->imd->nstimd))))
             {
                 stateGpu->copyForcesFromGpu(f.view().force(), AtomLocality::Local);
                 stateGpu->waitForcesReadyOnHost(AtomLocality::Local);

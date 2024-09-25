@@ -1020,7 +1020,6 @@ void ImdSession::Impl::syncNodes(const t_commrec* cr, double t)
         block_bc(cr->mpi_comm_mygroup, nstimd_new);
     }
 
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%d nstimd after new", nstimd_new);
     /* Now we all set the (new) nstimd communication time step */
     nstimd = nstimd_new;
 
@@ -1126,7 +1125,6 @@ void ImdSession::Impl::readCommand()
 
             /* the client doen't want to talk to us anymore */
             case IMDMessageType::Disconnect:
-                GMX_LOG(mdLog_.warning).appendTextFormatted("%s Okay client, you asked for it", IMDstr);
                 GMX_LOG(mdLog_.warning).appendTextFormatted(" %s Disconnecting client.", IMDstr);
                 disconnectClient();
                 break;
@@ -1495,7 +1493,6 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     {
         return session;
     }
-
     // TODO As IMD is intended for interactivity, and the .tpr file
     // opted in for that, it is acceptable to write more terminal
     // output than in a typical simulation. However, all the GMX_LOG
@@ -1503,20 +1500,13 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     // terminal. This is probably be implemented by adding a logging
     // stream named like ImdInfo, to separate it from warning and to
     // send it to both destinations.
-    impl->imdversion = ir->imd->imdversion;
-    impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
-    impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
-    impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
-    impl->imdsessioninfo->bWrapCoords     = (char)ir->imd->bWrapCoords;
-    impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
-    impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
-    impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
+    int version = ir->imd->imdversion;
     if (EI_DYNAMICS(ir->eI))
     {
-        if (impl->imdversion == 2) {
+        if (version == 2) {
             impl->defaultNstImd = ir->nstcalcenergy;
         }
-        else {
+        else if (version == 3) {
             impl->nstimd                          = ir->imd->nstimd;
             impl->defaultNstImd                   = ir->imd->nstimd;
         }
@@ -1633,8 +1623,6 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     /* read environment on main and prepare socket for incoming connections */
     if (MAIN(cr))
     {
-        GMX_LOG(mdlog.warning).appendTextFormatted("%s Parsed IMD Version %d.", IMDstr, ir->imd->imdversion);
-
         /* we allocate memory for our IMD energy structure */
         int32_t recsize = c_headerSize + sizeof(IMDEnergyBlock);
         snew(impl->energysendbuf, recsize);
@@ -1677,6 +1665,14 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         int32_t bufxsize = c_headerSize + 3 * sizeof(float) * impl->nat;
         snew(impl->coordsendbuf, bufxsize);
         snew(impl->imdsessioninfo, sizeof(IMDSessionInfo));
+        impl->imdversion = ir->imd->imdversion;
+        impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
+        impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
+        impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
+        impl->imdsessioninfo->bWrapCoords     = (char)ir->imd->bWrapCoords;
+        impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
+        impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
+        impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
     }
 
     /* do we allow interactive pulling? If so let the other nodes know. */
@@ -1757,7 +1753,6 @@ bool ImdSession::Impl::run(int64_t                        step,
 
     /* is this an IMD communication step? */
     bool imdstep = do_per_step(step, nstimd);
-    GMX_LOG(mdLog_.warning).appendTextFormatted("%d NSTIMD", nstimd);
 
     /* OK so this is an IMD step ... */
     if (imdstep)
@@ -1782,7 +1777,6 @@ bool ImdSession::Impl::run(int64_t                        step,
         }
 
         if (imdversion == 3) {
-            GMX_LOG(mdLog_.warning).appendTextFormatted("%s Copying velocity data", IMDstr);
             time       = t;
             this->step = step;
 
@@ -1808,7 +1802,7 @@ bool ImdSession::Impl::run(int64_t                        step,
 }
 
 void ImdSession::sendTimeBoxPositionsVelocitiesForcesEnergies()
-{
+{   
     if (!impl_->sessionPossible || !impl_->clientsocket)
     {
         return;
