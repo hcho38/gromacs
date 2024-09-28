@@ -522,7 +522,7 @@ static void do_imd(gmx::ISerializer* serializer, t_IMD* imd)
     serializer->doInt(&imd->nstimd);
     serializer->doInt(&imd->imdversion);
     serializer->doBool(&imd->bSendCoords);
-    serializer->doBool(&imd->bWrapCoords);
+    serializer->doBool(&imd->bUnwrapCoords);
     serializer->doBool(&imd->bSendEnergies);
     serializer->doInt(&imd->imdversion);
     if (imd->imdversion == 3)

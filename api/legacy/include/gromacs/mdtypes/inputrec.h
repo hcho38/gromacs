@@ -297,7 +297,7 @@ struct t_IMD
     //! Whether to send coordinate data
     bool bSendCoords;
     //! Whether to wrap coordinates
-    bool bWrapCoords;
+    bool bUnwrapCoords;
     //! Whether to send velocities
     bool bSendVelocities;
     //! Whether to send forces

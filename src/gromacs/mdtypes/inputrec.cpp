@@ -823,7 +823,7 @@ static void pr_imd(FILE* fp, int indent, const t_IMD* imd)
     PI("IMD-time", imd->bSendTime);
     PI("IMD-box", imd->bSendBox);
     PI("IMD-coords", imd->bSendCoords);
-    PI("IMD-wrap", imd->bWrapCoords);
+    PI("IMD-unwrap", imd->bUnwrapCoords);
     PI("IMD-vels", imd->bSendVelocities);
     PI("IMD-forces", imd->bSendForces);
     PI("IMD-energies", imd->bSendEnergies);

@@ -147,7 +147,7 @@ typedef struct
     char bSendEnergies;
     char bSendBox;
     char bSendCoords;
-    char bWrapCoords;
+    char bUnwrapCoords;
     char bSendVelocities;
     char bSendForces;
 } IMDSessionInfo;
@@ -1669,7 +1669,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
         impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
         impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
-        impl->imdsessioninfo->bWrapCoords     = (char)ir->imd->bWrapCoords;
+        impl->imdsessioninfo->bUnwrapCoords     = (char)ir->imd->bUnwrapCoords;
         impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
         impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
         impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
@@ -1765,13 +1765,16 @@ bool ImdSession::Impl::run(int64_t                        step,
      * and put molecules back into the box before transfer */
     if ((imdstep && bConnected) || bNS) /* independent of imdstep, we communicate positions at each NS step */
     {
+        if (imdsessioninfo->bUnwrapCoords) {
+
+        }
         /* Transfer the IMD positions to the main node. Every node contributes
          * its local positions x and stores them in the assembled xa array. */
         communicate_group_positions(
                 cr_, xa, xa_shifts, xa_eshifts, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
 
         /* If connected and main -> remove shifts */
-        if (imdsessioninfo->bWrapCoords && (imdstep && bConnected) && MAIN(cr_))
+        if (imdsessioninfo->bUnwrapCoords && (imdstep && bConnected) && MAIN(cr_))
         {
             removeMolecularShifts(box);
         }

@@ -2581,7 +2581,7 @@ void get_ir(const char*     mdparin,
         ir->imd->bSendTime       = (getEnum<Boolean>(&inp, "IMD-time", wi) != Boolean::No);
         ir->imd->bSendBox        = (getEnum<Boolean>(&inp, "IMD-box", wi) != Boolean::No);
         ir->imd->bSendCoords     = (getEnum<Boolean>(&inp, "IMD-coords", wi) != Boolean::No);
-        ir->imd->bWrapCoords     = (getEnum<Boolean>(&inp, "IMD-wrap", wi) != Boolean::No);
+        ir->imd->bUnwrapCoords     = (getEnum<Boolean>(&inp, "IMD-unwrap", wi) != Boolean::No);
         ir->imd->bSendForces     = (getEnum<Boolean>(&inp, "IMD-forces", wi) != Boolean::No);
         ir->imd->bSendVelocities = (getEnum<Boolean>(&inp, "IMD-vels", wi) != Boolean::No);
         ir->imd->bSendEnergies   = (getEnum<Boolean>(&inp, "IMD-energies", wi) != Boolean::No);
