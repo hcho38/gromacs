@@ -724,7 +724,6 @@ static int imd_send_rvecs_forces(IMDSocket* socket, int nat, rvec* f, char* buff
     float   sendf[3];
     int     tuplesize = 3 * sizeof(float);
 
-
     /* Required size for the send buffer */
     size = c_headerSize + 3 * sizeof(float) * nat;
 
@@ -1849,7 +1848,7 @@ void ImdSession::sendTimeBoxPositionsVelocitiesForcesEnergies()
         impl_->issueFatalError("Error sending updated velocities. Disconnecting client.");
     }
     if (impl_->imdsessioninfo->bSendForces
-        && imd_send_rvecs_forces(impl_->clientsocket, impl_->nat, impl_->va, impl_->coordsendbuf))
+        && imd_send_rvecs_forces(impl_->clientsocket, impl_->nat, impl_->fa, impl_->coordsendbuf))
     {
         impl_->issueFatalError("Error sending updated forces. Disconnecting client.");
     }
