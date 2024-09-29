@@ -1766,36 +1766,51 @@ bool ImdSession::Impl::run(int64_t                        step,
     if ((imdstep && bConnected) || bNS) /* independent of imdstep, we communicate positions at each NS step */
     {
         if (imdsessioninfo->bUnwrapCoords) {
+            /* Transfer the IMD positions to the main node. Every node contributes
+            * its local positions x and stores them in the assembled xa array. */
+            communicate_group_positions(
+                    cr_, xa, xa_shifts, xa_eshifts, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
 
+            if ((imdstep && bConnected) && MAIN(cr_))
+                {
+                    /* If connected and main -> remove shifts */
+                    removeMolecularShifts(box);
+                }
         }
-        /* Transfer the IMD positions to the main node. Every node contributes
-         * its local positions x and stores them in the assembled xa array. */
-        communicate_group_positions(
-                cr_, xa, xa_shifts, xa_eshifts, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
-
-        /* If connected and main -> remove shifts */
-        if (imdsessioninfo->bUnwrapCoords && (imdstep && bConnected) && MAIN(cr_))
-        {
-            removeMolecularShifts(box);
+        else {
+             communicate_group_positions(
+                    cr_, xa, nullptr, nullptr, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
         }
+  
 
         if (imdversion == 3) {
-            time       = t;
-            this->step = step;
-
-            const rvec* v_loc = as_rvec_array(vels.data());
-            for (int i = 0; i < nat_loc; i++)
-            {
-                copy_rvec(v_loc[ind_loc[i]], va[xa_ind[i]]);
+            if (imdsessioninfo->bSendTime) {
+                time       = t;
+                this->step = step;
+            }
+            if (imdsessioninfo->bSendBox) {
+                copy_mat(box, b);
+            }
+            if (imdsessioninfo->bSendVelocities) {
+                communicate_group_positions(
+                    cr_, va, nullptr, nullptr, true, as_rvec_array(vels.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
+            }
+            if (imdsessioninfo->bSendForces) {
+                communicate_group_positions(
+                    cr_, fa, nullptr, nullptr, true, as_rvec_array(forces.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
             }
 
-            const rvec* f_loc = as_rvec_array(forces.data());
-            for (int i = 0; i < nat_loc; i++)
-            {
-                copy_rvec(f_loc[ind_loc[i]], fa[xa_ind[i]]);
-            }
+            // const rvec* v_loc = as_rvec_array(vels.data());
+            // for (int i = 0; i < nat_loc; i++)
+            // {
+            //     copy_rvec(v_loc[ind_loc[i]], va[xa_ind[i]]);
+            // }
 
-            copy_mat(box, b);
+            // const rvec* f_loc = as_rvec_array(forces.data());
+            // for (int i = 0; i < nat_loc; i++)
+            // {
+            //     copy_rvec(f_loc[ind_loc[i]], fa[xa_ind[i]]);
+            // }
         }
     }
 
