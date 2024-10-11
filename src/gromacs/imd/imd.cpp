@@ -713,7 +713,6 @@ static int imd_send_rvecs_vel(IMDSocket* socket, int nat, rvec* v, char* buffer)
     }
 
 
-    
     return static_cast<int>(imd_write_multiple(socket, buffer, size) != size);
 }
 
@@ -1502,17 +1501,20 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     int version = ir->imd->imdversion;
     if (EI_DYNAMICS(ir->eI))
     {
-        if (version == 2) {
+        if (version == 2)
+        {
             impl->defaultNstImd = ir->nstcalcenergy;
         }
-        else if (version == 3) {
-            impl->nstimd_new                          = ir->imd->nstimd;
-            impl->defaultNstImd                   = ir->imd->nstimd;
+        else if (version == 3)
+        {
+            impl->nstimd_new    = ir->imd->nstimd;
+            impl->defaultNstImd = ir->imd->nstimd;
         }
     }
-    else if (EI_ENERGY_MINIMIZATION(ir->eI)) {
+    else if (EI_ENERGY_MINIMIZATION(ir->eI))
+    {
         impl->defaultNstImd = ir->imd->nstimd;
-        impl->nstimd_new = ir->imd->nstimd;
+        impl->nstimd_new    = ir->imd->nstimd;
     }
     else
     {
@@ -1664,11 +1666,11 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         int32_t bufxsize = c_headerSize + 3 * sizeof(float) * impl->nat;
         snew(impl->coordsendbuf, bufxsize);
         snew(impl->imdsessioninfo, sizeof(IMDSessionInfo));
-        impl->imdversion = ir->imd->imdversion;
+        impl->imdversion                      = ir->imd->imdversion;
         impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
         impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
         impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
-        impl->imdsessioninfo->bUnwrapCoords     = (char)ir->imd->bUnwrapCoords;
+        impl->imdsessioninfo->bUnwrapCoords   = (char)ir->imd->bUnwrapCoords;
         impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
         impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
         impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
@@ -1764,39 +1766,56 @@ bool ImdSession::Impl::run(int64_t                        step,
      * and put molecules back into the box before transfer */
     if ((imdstep && bConnected) || bNS) /* independent of imdstep, we communicate positions at each NS step */
     {
-        if (imdsessioninfo->bUnwrapCoords) {
+        if (imdsessioninfo->bUnwrapCoords)
+        {
             /* Transfer the IMD positions to the main node. Every node contributes
-            * its local positions x and stores them in the assembled xa array. */
-            communicate_group_positions(
-                    cr_, xa, xa_shifts, xa_eshifts, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
+             * its local positions x and stores them in the assembled xa array. */
+            communicate_group_positions(cr_,
+                                        xa,
+                                        xa_shifts,
+                                        xa_eshifts,
+                                        false,
+                                        as_rvec_array(coords.data()),
+                                        nat,
+                                        nat_loc,
+                                        ind_loc,
+                                        xa_ind,
+                                        xa_old,
+                                        box);
 
             if ((imdstep && bConnected) && MAIN(cr_))
-                {
-                    /* If connected and main -> remove shifts */
-                    removeMolecularShifts(box);
-                }
+            {
+                /* If connected and main -> remove shifts */
+                removeMolecularShifts(box);
+            }
         }
-        else {
-             communicate_group_positions(
-                    cr_, xa, nullptr, nullptr, true, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
+        else
+        {
+            communicate_group_positions(
+                    cr_, xa, nullptr, nullptr, false, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
         }
-  
 
-        if (imdversion == 3) {
-            if (imdsessioninfo->bSendTime) {
+
+        if (imdversion == 3)
+        {
+            if (imdsessioninfo->bSendTime)
+            {
                 time       = t;
                 this->step = step;
             }
-            if (imdsessioninfo->bSendBox) {
+            if (imdsessioninfo->bSendBox)
+            {
                 copy_mat(box, b);
             }
-            if (imdsessioninfo->bSendVelocities) {
+            if (imdsessioninfo->bSendVelocities)
+            {
                 communicate_group_positions(
-                    cr_, va, nullptr, nullptr, true, as_rvec_array(vels.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
+                        cr_, va, nullptr, nullptr, true, as_rvec_array(vels.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
             }
-            if (imdsessioninfo->bSendForces) {
+            if (imdsessioninfo->bSendForces)
+            {
                 communicate_group_positions(
-                    cr_, fa, nullptr, nullptr, true, as_rvec_array(forces.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
+                        cr_, fa, nullptr, nullptr, true, as_rvec_array(forces.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
             }
 
             // const rvec* v_loc = as_rvec_array(vels.data());
@@ -1819,17 +1838,19 @@ bool ImdSession::Impl::run(int64_t                        step,
 }
 
 void ImdSession::sendTimeBoxPositionsVelocitiesForcesEnergies()
-{   
+{
     if (!impl_->sessionPossible || !impl_->clientsocket)
     {
         return;
     }
-    if (impl_->imdsessioninfo->bSendTime && imd_send_time(impl_->clientsocket, impl_->dt, impl_->time, impl_->step, impl_->timesendbuf))
+    if (impl_->imdsessioninfo->bSendTime
+        && imd_send_time(impl_->clientsocket, impl_->dt, impl_->time, impl_->step, impl_->timesendbuf))
     {
         impl_->issueFatalError("Error sending updated time. Disconnecting client.");
     }
 
-    if (impl_->imdsessioninfo->bSendEnergies && imd_send_energies(impl_->clientsocket, impl_->energies, impl_->energysendbuf))
+    if (impl_->imdsessioninfo->bSendEnergies
+        && imd_send_energies(impl_->clientsocket, impl_->energies, impl_->energysendbuf))
     {
         impl_->issueFatalError("Error sending updated energies. Disconnecting client.");
     }
@@ -1838,7 +1859,8 @@ void ImdSession::sendTimeBoxPositionsVelocitiesForcesEnergies()
         impl_->issueFatalError("Error sending updated box. Disconnecting client.");
     }
 
-    if (impl_->imdsessioninfo->bSendCoords && imd_send_rvecs(impl_->clientsocket, impl_->nat, impl_->xa, impl_->coordsendbuf))
+    if (impl_->imdsessioninfo->bSendCoords
+        && imd_send_rvecs(impl_->clientsocket, impl_->nat, impl_->xa, impl_->coordsendbuf))
     {
         impl_->issueFatalError("Error sending updated positions. Disconnecting client.");
     }
@@ -1925,14 +1947,17 @@ void ImdSession::updateEnergyRecordAndSendPositionsAndEnergies(bool bIMDstep, in
     /* Update time step for IMD and prepare IMD energy record if we have new energies. */
     fillEnergyRecord(step, bHaveNewEnergies);
 
-    if (bIMDstep) {
-        if (impl_->imdversion == 2) {
+    if (bIMDstep)
+    {
+        if (impl_->imdversion == 2)
+        {
             /* Send positions and energies to VMD client via IMD */
             sendPositionsAndEnergies();
         }
-        else if (impl_->imdversion == 3) {
+        else if (impl_->imdversion == 3)
+        {
             sendTimeBoxPositionsVelocitiesForcesEnergies();
-        } 
+        }
     }
 
     wallcycle_stop(impl_->wcycle, WallCycleCounter::Imd);
