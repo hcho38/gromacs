@@ -1411,14 +1411,24 @@ void ImdSession::Impl::removeMolecularShifts(const matrix box) const
 
 void ImdSession::Impl::prepareForPositionAssembly(const t_commrec* cr, gmx::ArrayRef<const gmx::RVec> coords)
 {
-    snew(xa, nat);
+
     snew(xa_ind, nat);
     snew(xa_shifts, nat);
     snew(xa_eshifts, nat);
     snew(xa_old, nat);
 
-    snew(va, nat);
-    snew(fa, nat);
+    if (imdsessioninfo->bSendCoords)
+    {
+        snew(xa, nat);
+    }
+    if (imdsessioninfo->bSendVelocities)
+    {
+        snew(va, nat);
+    }
+    if (imdsessioninfo->bSendForces)
+    {
+        snew(fa, nat);
+    }
 
     /* Save the original (whole) set of positions such that later the
      * molecule can always be made whole again */
@@ -1674,6 +1684,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
         impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
         impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
+        GMX_LOG(mdlog.warning).appendTextFormatted("Made IMD session");
     }
 
     /* do we allow interactive pulling? If so let the other nodes know. */
@@ -1762,39 +1773,46 @@ bool ImdSession::Impl::run(int64_t                        step,
         syncNodes(cr_, t);
     }
 
+    GMX_LOG(mdLog_.warning).appendTextFormatted("Communicatiting positions");
     /* If a client is connected, we collect the positions
      * and put molecules back into the box before transfer */
     if ((imdstep && bConnected) || bNS) /* independent of imdstep, we communicate positions at each NS step */
     {
-        if (imdsessioninfo->bUnwrapCoords)
+        if (imdsessioninfo->bSendCoords)
         {
-            /* Transfer the IMD positions to the main node. Every node contributes
-             * its local positions x and stores them in the assembled xa array. */
-            communicate_group_positions(cr_,
-                                        xa,
-                                        xa_shifts,
-                                        xa_eshifts,
-                                        false,
-                                        as_rvec_array(coords.data()),
-                                        nat,
-                                        nat_loc,
-                                        ind_loc,
-                                        xa_ind,
-                                        xa_old,
-                                        box);
-
-            if ((imdstep && bConnected) && MAIN(cr_))
+            if (imdsessioninfo->bUnwrapCoords)
             {
-                /* If connected and main -> remove shifts */
-                removeMolecularShifts(box);
+                GMX_LOG(mdLog_.warning).appendTextFormatted("Wrapping coordinates");
+                /* Transfer the IMD positions to the main node. Every node contributes
+                 * its local positions x and stores them in the assembled xa array. */
+                communicate_group_positions(cr_,
+                                            xa,
+                                            xa_shifts,
+                                            xa_eshifts,
+                                            true,
+                                            as_rvec_array(coords.data()),
+                                            nat,
+                                            nat_loc,
+                                            ind_loc,
+                                            xa_ind,
+                                            xa_old,
+                                            box);
+
+                if ((imdstep && bConnected) && MAIN(cr_))
+                {
+                    /* If connected and main -> remove shifts */
+                    removeMolecularShifts(box);
+                }
+            }
+            else
+            {
+                GMX_LOG(mdLog_.warning).appendTextFormatted("No unwrapping of coordinates");
+                communicate_group_positions(
+                        cr_, xa, nullptr, nullptr, false, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
             }
         }
-        else
-        {
-            communicate_group_positions(
-                    cr_, xa, nullptr, nullptr, false, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, xa_old, box);
-        }
 
+        GMX_LOG(mdLog_.warning).appendTextFormatted("Sending v, f");
 
         if (imdversion == 3)
         {
@@ -1807,28 +1825,18 @@ bool ImdSession::Impl::run(int64_t                        step,
             {
                 copy_mat(box, b);
             }
+            GMX_LOG(mdLog_.warning).appendTextFormatted("Sending v");
             if (imdsessioninfo->bSendVelocities)
             {
                 communicate_group_positions(
                         cr_, va, nullptr, nullptr, true, as_rvec_array(vels.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
             }
+            GMX_LOG(mdLog_.warning).appendTextFormatted("Sending f");
             if (imdsessioninfo->bSendForces)
             {
                 communicate_group_positions(
                         cr_, fa, nullptr, nullptr, true, as_rvec_array(forces.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
             }
-
-            // const rvec* v_loc = as_rvec_array(vels.data());
-            // for (int i = 0; i < nat_loc; i++)
-            // {
-            //     copy_rvec(v_loc[ind_loc[i]], va[xa_ind[i]]);
-            // }
-
-            // const rvec* f_loc = as_rvec_array(forces.data());
-            // for (int i = 0; i < nat_loc; i++)
-            // {
-            //     copy_rvec(f_loc[ind_loc[i]], fa[xa_ind[i]]);
-            // }
         }
     }
 
