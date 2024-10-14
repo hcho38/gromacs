@@ -1608,6 +1608,17 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
     impl->enerd  = enerd;
     impl->dt     = ir->delta_t;
 
+    /* Each node gets its own session info, though only the root node will send it*/
+    snew(impl->imdsessioninfo, sizeof(IMDSessionInfo));
+    impl->imdversion                      = ir->imd->imdversion;
+    impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
+    impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
+    impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
+    impl->imdsessioninfo->bUnwrapCoords   = (char)ir->imd->bUnwrapCoords;
+    impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
+    impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
+    impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
+
 
     /* We might need to open an output file for IMD forces data */
     if (MAIN(cr))
@@ -1675,15 +1686,7 @@ std::unique_ptr<ImdSession> makeImdSession(const t_inputrec*              ir,
         snew(impl->energies, 1);
         int32_t bufxsize = c_headerSize + 3 * sizeof(float) * impl->nat;
         snew(impl->coordsendbuf, bufxsize);
-        snew(impl->imdsessioninfo, sizeof(IMDSessionInfo));
-        impl->imdversion                      = ir->imd->imdversion;
-        impl->imdsessioninfo->bSendTime       = (char)ir->imd->bSendTime;
-        impl->imdsessioninfo->bSendBox        = (char)ir->imd->bSendBox;
-        impl->imdsessioninfo->bSendCoords     = (char)ir->imd->bSendCoords;
-        impl->imdsessioninfo->bUnwrapCoords   = (char)ir->imd->bUnwrapCoords;
-        impl->imdsessioninfo->bSendVelocities = (char)ir->imd->bSendVelocities;
-        impl->imdsessioninfo->bSendForces     = (char)ir->imd->bSendForces;
-        impl->imdsessioninfo->bSendEnergies   = (char)ir->imd->bSendEnergies;
+
         GMX_LOG(mdlog.warning).appendTextFormatted("Made IMD session");
     }
 
