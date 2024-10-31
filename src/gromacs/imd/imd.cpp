@@ -407,6 +407,7 @@ enum class IMDMessageType : int
     Box, /**< box size                                        */
     Velocities,
     Forces,
+    Wait,
     Count /**< number of entries                               */
 };
 
@@ -417,7 +418,8 @@ static const char* enumValueToString(IMDMessageType enumValue)
 {
     constexpr gmx::EnumerationArray<IMDMessageType, const char*> imdMessageTypeNames = {
         "IMD_DISCONNECT", "IMD_ENERGIES", "IMD_FCOORDS", "IMD_GO",    "IMD_HANDSHAKE",
-        "IMD_KILL",       "IMD_MDCOMM",   "IMD_PAUSE",   "IMD_TRATE", "IMD_IOERROR"
+        "IMD_KILL",       "IMD_MDCOMM",   "IMD_PAUSE",   "IMD_TRATE", "IMD_IOERROR", 
+        "IMD_WAIT"
     };
     return imdMessageTypeNames[enumValue];
 }
@@ -1162,6 +1164,23 @@ void ImdSession::Impl::readCommand()
                         .appendTextFormatted(" %s Update frequency will be set to %d.", IMDstr, nstimd_new);
                 break;
 
+            case IMDMessageType::Wait:
+                if (imdversion == 3)
+                {
+                    int32_t waitModeValue = length;
+                    if (waitModeValue = 0)
+                    {
+                        bWConnect = false;  /* Set to non-blocking mode */
+                    }
+                    else
+                    {
+                        bWConnect = true;  /* Set to blocking mode */
+                    }
+                    GMX_LOG(mdLog_.warning)
+                            .appendTextFormatted("%s Wait mode updated: %s", IMDstr, bWConnect ? "Blocking" : "Non-blocking");
+                }
+                break;    
+
             /* Catch all rule for the remaining IMD types which we don't expect */
             default:
                 GMX_LOG(mdLog_.warning)
@@ -1776,7 +1795,7 @@ bool ImdSession::Impl::run(int64_t                        step,
         syncNodes(cr_, t);
     }
 
-    GMX_LOG(mdLog_.warning).appendTextFormatted("Communicatiting positions");
+    /* GMX_LOG(mdLog_.warning).appendTextFormatted("Communicatiting positions"); */
     /* If a client is connected, we collect the positions
      * and put molecules back into the box before transfer */
     if ((imdstep && bConnected) || bNS) /* independent of imdstep, we communicate positions at each NS step */
@@ -1815,7 +1834,7 @@ bool ImdSession::Impl::run(int64_t                        step,
             }
         }
 
-        GMX_LOG(mdLog_.warning).appendTextFormatted("Sending v, f");
+        /* GMX_LOG(mdLog_.warning).appendTextFormatted("Sending v, f"); */
 
         if (imdversion == 3)
         {
@@ -1828,17 +1847,17 @@ bool ImdSession::Impl::run(int64_t                        step,
             {
                 copy_mat(box, b);
             }
-            GMX_LOG(mdLog_.warning).appendTextFormatted("Sending v");
+            /* GMX_LOG(mdLog_.warning).appendTextFormatted("Sending v"); */
             if (imdsessioninfo->bSendVelocities)
             {
                 communicate_group_positions(
-                        cr_, va, nullptr, nullptr, true, as_rvec_array(vels.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
+                        cr_, va, nullptr, nullptr, false, as_rvec_array(vels.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, nullptr);
             }
-            GMX_LOG(mdLog_.warning).appendTextFormatted("Sending f");
+            /* GMX_LOG(mdLog_.warning).appendTextFormatted("Sending f"); */
             if (imdsessioninfo->bSendForces)
             {
                 communicate_group_positions(
-                        cr_, fa, nullptr, nullptr, true, as_rvec_array(forces.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
+                        cr_, fa, nullptr, nullptr, false, as_rvec_array(forces.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, nullptr);
             }
         }
     }
