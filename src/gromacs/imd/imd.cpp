@@ -1167,8 +1167,7 @@ void ImdSession::Impl::readCommand()
             case IMDMessageType::Wait:
                 if (imdversion == 3)
                 {
-                    int32_t waitModeValue = length;
-                    if (waitModeValue = 0)
+                    if (length == 0)
                     {
                         bWConnect = false;  /* Set to non-blocking mode */
                     }
@@ -1178,6 +1177,10 @@ void ImdSession::Impl::readCommand()
                     }
                     GMX_LOG(mdLog_.warning)
                             .appendTextFormatted("%s Wait mode updated: %s", IMDstr, bWConnect ? "Blocking" : "Non-blocking");
+                    if (bWConnect)
+                    {
+                        blockConnect();
+                    }
                 }
                 break;    
 
@@ -1804,7 +1807,7 @@ bool ImdSession::Impl::run(int64_t                        step,
         {
             if (imdsessioninfo->bUnwrapCoords)
             {
-                GMX_LOG(mdLog_.warning).appendTextFormatted("Wrapping coordinates");
+                /* GMX_LOG(mdLog_.warning).appendTextFormatted("Wrapping coordinates"); */
                 /* Transfer the IMD positions to the main node. Every node contributes
                  * its local positions x and stores them in the assembled xa array. */
                 communicate_group_positions(cr_,
