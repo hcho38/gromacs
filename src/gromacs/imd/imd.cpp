@@ -1831,7 +1831,7 @@ bool ImdSession::Impl::run(int64_t                        step,
             }
             else
             {
-                GMX_LOG(mdLog_.warning).appendTextFormatted("No unwrapping of coordinates");
+                /* GMX_LOG(mdLog_.warning).appendTextFormatted("No unwrapping of coordinates"); */
                 communicate_group_positions(
                         cr_, xa, nullptr, nullptr, false, as_rvec_array(coords.data()), nat, nat_loc, ind_loc, xa_ind, nullptr, box);
             }
